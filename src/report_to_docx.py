@@ -247,10 +247,10 @@ def markdown_to_docx_bytes(
     """
     doc = Document()
 
-    # ── 페이지 설정 (A4, 여백 25mm) ──────────────────────────
+    # ── 페이지 설정 (A4: 11906 x 16838 DXA, 1 DXA = 635 EMU) ───
     section = doc.sections[0]
-    section.page_width  = 595 * 914  // 100   # ~11906 EMU → DXA 변환 필요 없음, Inches 사용
-    section.page_height = 842 * 914  // 100
+    section.page_width  = 11906 * 635   # A4 너비: 11906 DXA → 7,560,310 EMU
+    section.page_height = 16838 * 635   # A4 높이: 16838 DXA → 10,692,130 EMU
     section.left_margin   = Cm(2.5)
     section.right_margin  = Cm(2.5)
     section.top_margin    = Cm(2.5)
