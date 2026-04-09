@@ -574,9 +574,32 @@ with tab6:
                         report_placeholder.markdown(full_report)
 
                 doc_labels = {"academic": "학술논문", "government": "정부보고서", "research": "연구보고서"}
-                st.download_button(
-                    label="📥 리포트 TXT 다운로드",
-                    data=full_report.encode("utf-8"),
-                    file_name=f"WISDOM_Lab_{doc_labels[doc_type]}_{subject_input or '분석결과'}.txt",
-                    mime="text/plain",
-                )
+                file_base = f"WISDOM_Lab_{doc_labels[doc_type]}_{subject_input or '분석결과'}"
+
+                dl_col1, dl_col2 = st.columns(2)
+                with dl_col1:
+                    st.download_button(
+                        label="📥 TXT 다운로드",
+                        data=full_report.encode("utf-8"),
+                        file_name=f"{file_base}.txt",
+                        mime="text/plain",
+                        use_container_width=True,
+                    )
+                with dl_col2:
+                    try:
+                        from src.report_to_docx import markdown_to_docx_bytes
+                        docx_bytes = markdown_to_docx_bytes(
+                            md_text=full_report,
+                            title=f"WISDOM Lab {doc_labels[doc_type]}",
+                            subject=subject_input or "",
+                            doc_type_label=doc_labels[doc_type],
+                        )
+                        st.download_button(
+                            label="📄 Word(.docx) 다운로드",
+                            data=docx_bytes,
+                            file_name=f"{file_base}.docx",
+                            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                            use_container_width=True,
+                        )
+                    except Exception as e:
+                        st.error(f"Word 변환 오류: {e}")
