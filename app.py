@@ -40,8 +40,8 @@ if "tfidf_df" not in st.session_state:
     st.session_state.tfidf_df = None
 if "topics_df" not in st.session_state:
     st.session_state.topics_df = None
-if "lda_model" not in st.session_state:
-    st.session_state.lda_model = None
+if "nmf_model" not in st.session_state:
+    st.session_state.nmf_model = None
 
 # ── 탭 구성 ──────────────────────────────────────────────────
 tab1, tab2, tab3, tab4, tab5 = st.tabs([
@@ -213,7 +213,8 @@ with tab3:
 # 탭 4: 토픽 모델링
 # ══════════════════════════════════════════════════════════════
 with tab4:
-    st.header("🧩 LDA 토픽 모델링")
+    st.header("🧩 NMF 토픽 모델링")
+    st.caption("비음수 행렬 분해(NMF) 기반 토픽 모델링 — TF-IDF 벡터를 분해해 잠재 주제를 추출합니다.")
 
     if st.session_state.preprocessed is None:
         st.info("먼저 [📂 데이터 업로드] 탭에서 데이터를 불러오고 형태소 분석을 실행하세요.")
@@ -226,33 +227,35 @@ with tab4:
             auto_optimize = st.checkbox("최적 토픽 수 자동 탐색", value=False)
             if not auto_optimize:
                 num_topics = st.slider("토픽 수", 2, 10, 5)
-            passes = st.slider("학습 반복 횟수", 5, 30, 10)
+            passes = st.slider("최대 반복 횟수", 50, 300, 200)
 
         with col2:
             if st.button("🧩 토픽 모델링 실행", type="primary"):
                 from src.topic_modeler import train_lda, get_optimal_topics, get_topics_df, get_topic_word_weights
 
                 if auto_optimize:
-                    with st.spinner("최적 토픽 수 탐색 중... (수 분 소요)"):
+                    with st.spinner("최적 토픽 수 탐색 중..."):
                         scores = get_optimal_topics(nouns_list)
                     if scores:
                         best_k = max(scores, key=scores.get)
-                        st.info(f"최적 토픽 수: {best_k} (Coherence: {scores[best_k]})")
+                        st.info(f"최적 토픽 수: {best_k}개 (재구성 적합도: {scores[best_k]:.4f})")
                         num_topics = best_k
-                        st.line_chart(scores)
+                        st.line_chart(
+                            {k: v for k, v in scores.items()},
+                        )
                     else:
                         num_topics = 5
 
                 with st.spinner(f"{num_topics}개 토픽 학습 중..."):
-                    model, corpus, dictionary = train_lda(nouns_list, num_topics, passes)
-                    st.session_state.lda_model = model
+                    model, corpus, vectorizer = train_lda(nouns_list, num_topics, passes)
+                    st.session_state.nmf_model = model
                     topics_df = get_topics_df(model)
                     st.session_state.topics_df = topics_df
 
                 if model is None:
                     st.error("토픽 모델링 실패: 충분한 데이터가 필요합니다.")
                 else:
-                    st.success(f"{num_topics}개 토픽 학습 완료!")
+                    st.success(f"✅ {num_topics}개 토픽 추출 완료! (NMF)")
                     st.subheader("📋 토픽 요약")
                     st.dataframe(topics_df, use_container_width=True)
 
