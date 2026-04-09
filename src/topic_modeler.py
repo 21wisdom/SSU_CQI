@@ -1,71 +1,67 @@
 """
-LDA 토픽 모델링 모듈
-gensim 기반 토픽 분석 + Coherence 최적화
+NMF 토픽 모델링 모듈
+scikit-learn 기반 토픽 분석 (gensim 대체 - Python 3.14 호환)
 """
 
 import pandas as pd
 import numpy as np
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.decomposition import NMF
 
 
 def train_lda(nouns_list: list, num_topics: int = 5, passes: int = 10):
     """
-    LDA 모델 학습
-    반환: (model, corpus, dictionary)
+    NMF 모델 학습 (LDA 인터페이스 호환)
+    반환: (model_dict, corpus, vectorizer)
     """
-    try:
-        from gensim import corpora
-        from gensim.models import LdaModel
-    except ImportError:
-        return None, None, None
-
     # 빈 문서 제거
-    filtered = [nouns for nouns in nouns_list if nouns]
+    filtered = [" ".join(nouns) for nouns in nouns_list if nouns]
     if len(filtered) < 5:
         return None, None, None
 
-    dictionary = corpora.Dictionary(filtered)
-    # 너무 희귀하거나 너무 흔한 단어 필터
-    dictionary.filter_extremes(no_below=2, no_above=0.8)
-    corpus = [dictionary.doc2bow(text) for text in filtered]
+    vectorizer = TfidfVectorizer(max_df=0.85, min_df=2, max_features=500)
+    try:
+        tfidf_matrix = vectorizer.fit_transform(filtered)
+    except ValueError:
+        return None, None, None
 
-    model = LdaModel(
-        corpus=corpus,
-        id2word=dictionary,
-        num_topics=num_topics,
-        passes=passes,
-        random_state=42,
-        alpha="auto",
-        per_word_topics=True,
-    )
-    return model, corpus, dictionary
+    if tfidf_matrix.shape[1] == 0:
+        return None, None, None
+
+    n_topics = min(num_topics, tfidf_matrix.shape[1])
+    nmf = NMF(n_components=n_topics, random_state=42, max_iter=200)
+    nmf.fit(tfidf_matrix)
+
+    feature_names = vectorizer.get_feature_names_out()
+    model_dict = {
+        "nmf": nmf,
+        "feature_names": feature_names,
+        "num_topics": n_topics,
+    }
+    return model_dict, tfidf_matrix, vectorizer
 
 
 def get_optimal_topics(nouns_list: list, start: int = 2, limit: int = 8) -> dict:
     """
-    Coherence Score로 최적 토픽 수 탐색
-    반환: {num_topics: coherence_score}
+    재구성 오류 기반 최적 토픽 수 탐색
+    반환: {num_topics: reconstruction_error}
     """
-    try:
-        from gensim import corpora
-        from gensim.models import LdaModel, CoherenceModel
-    except ImportError:
-        return {}
-
-    filtered = [n for n in nouns_list if n]
+    filtered = [" ".join(nouns) for nouns in nouns_list if nouns]
     if len(filtered) < 10:
         return {}
 
-    dictionary = corpora.Dictionary(filtered)
-    dictionary.filter_extremes(no_below=2, no_above=0.8)
-    corpus = [dictionary.doc2bow(t) for t in filtered]
+    vectorizer = TfidfVectorizer(max_df=0.85, min_df=2, max_features=500)
+    try:
+        tfidf_matrix = vectorizer.fit_transform(filtered)
+    except ValueError:
+        return {}
 
     scores = {}
-    for k in range(start, limit + 1):
-        model = LdaModel(corpus, id2word=dictionary, num_topics=k,
-                         passes=5, random_state=42)
-        cm = CoherenceModel(model=model, texts=filtered,
-                            dictionary=dictionary, coherence="c_v")
-        scores[k] = round(cm.get_coherence(), 4)
+    for k in range(start, min(limit + 1, tfidf_matrix.shape[1] + 1)):
+        nmf = NMF(n_components=k, random_state=42, max_iter=200)
+        nmf.fit(tfidf_matrix)
+        # 낮은 재구성 오류 = 더 나은 모델 (음수로 반환해서 max()와 호환)
+        scores[k] = round(-nmf.reconstruction_err_, 4)
     return scores
 
 
@@ -74,11 +70,16 @@ def get_topics_df(model, num_words: int = 10) -> pd.DataFrame:
     if model is None:
         return pd.DataFrame()
 
+    nmf = model["nmf"]
+    feature_names = model["feature_names"]
+    num_topics = model["num_topics"]
+
     rows = []
-    for topic_id in range(model.num_topics):
-        words = model.show_topic(topic_id, topn=num_words)
-        keyword_str = ", ".join([w for w, _ in words])
-        top_word = words[0][0] if words else f"토픽{topic_id + 1}"
+    for topic_id in range(num_topics):
+        top_indices = nmf.components_[topic_id].argsort()[-num_words:][::-1]
+        words = [feature_names[i] for i in top_indices]
+        keyword_str = ", ".join(words)
+        top_word = words[0] if words else f"토픽{topic_id + 1}"
         rows.append({
             "토픽 번호": f"토픽 {topic_id + 1}",
             "대표 키워드": top_word,
@@ -91,7 +92,11 @@ def get_topic_word_weights(model, topic_id: int, num_words: int = 15) -> pd.Data
     """특정 토픽의 단어-가중치 데이터프레임"""
     if model is None:
         return pd.DataFrame()
-    words = model.show_topic(topic_id, topn=num_words)
+
+    nmf = model["nmf"]
+    feature_names = model["feature_names"]
+    top_indices = nmf.components_[topic_id].argsort()[-num_words:][::-1]
+    words = [(feature_names[i], round(float(nmf.components_[topic_id][i]), 4))
+             for i in top_indices]
     df = pd.DataFrame(words, columns=["단어", "가중치"])
-    df["가중치"] = df["가중치"].round(4)
     return df
