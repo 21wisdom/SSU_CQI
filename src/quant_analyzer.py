@@ -5,6 +5,7 @@ WISDOM Lab - 정량 분석 모듈
 """
 
 import io
+import os
 import numpy as np
 import pandas as pd
 import matplotlib
@@ -16,18 +17,55 @@ from scipy import stats
 import warnings
 warnings.filterwarnings("ignore")
 
-# ── 한국어 폰트 설정 ───────────────────────────────────────────
-def _set_korean_font():
+# ── 한국어 폰트 설정 (keyword_analyzer와 동일 방식) ─────────────
+_FONT_PROP = None
+
+def _get_font_prop():
+    global _FONT_PROP
+    if _FONT_PROP is not None:
+        return _FONT_PROP
+
+    fm._load_fontmanager(try_read_cache=False)
+
     candidates = [
-        "NanumGothic", "NanumBarunGothic", "Apple SD Gothic Neo",
-        "Malgun Gothic", "Noto Sans KR", "DejaVu Sans",
+        "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",
+        "/usr/share/fonts/opentype/nanum/NanumGothic.otf",
+        "C:/Windows/Fonts/malgun.ttf",
+        "C:/Windows/Fonts/gulim.ttc",
+        "/System/Library/Fonts/AppleGothic.ttf",
     ]
-    available = {f.name for f in fm.fontManager.ttflist}
-    for font in candidates:
-        if font in available:
-            plt.rcParams["font.family"] = font
-            break
-    plt.rcParams["axes.unicode_minus"] = False
+    for path in candidates:
+        if os.path.exists(path):
+            _FONT_PROP = fm.FontProperties(fname=path)
+            plt.rcParams["font.family"] = _FONT_PROP.get_name()
+            plt.rcParams["axes.unicode_minus"] = False
+            return _FONT_PROP
+
+    for f in fm.findSystemFonts():
+        lower = f.lower()
+        if any(kw in lower for kw in ["nanum", "malgun", "gothic", "gulim"]):
+            _FONT_PROP = fm.FontProperties(fname=f)
+            plt.rcParams["font.family"] = _FONT_PROP.get_name()
+            plt.rcParams["axes.unicode_minus"] = False
+            return _FONT_PROP
+
+    return None
+
+
+def _set_korean_font():
+    """기존 호출 호환용 — _get_font_prop()으로 위임"""
+    _get_font_prop()
+
+
+def _apply_font_to_ax(ax, fp):
+    """ax 모든 텍스트에 폰트 적용"""
+    if fp is None:
+        return
+    for lbl in ax.get_xticklabels() + ax.get_yticklabels():
+        lbl.set_fontproperties(fp)
+    for attr in [ax.title, ax.xaxis.label, ax.yaxis.label]:
+        if attr:
+            attr.set_fontproperties(fp)
 
 
 def _fig_to_bytes(fig) -> bytes:
@@ -58,12 +96,14 @@ def descriptive_stats(df: pd.DataFrame, columns: list) -> tuple[pd.DataFrame, by
     desc["N"] = desc["N"].astype(int)
 
     # 박스플롯
-    _set_korean_font()
+    fp = _get_font_prop()
     fig, ax = plt.subplots(figsize=(max(6, len(sub.columns) * 1.5), 5))
     sub.boxplot(ax=ax, grid=False, patch_artist=True,
                 boxprops=dict(facecolor="#4C72B0", alpha=0.6))
-    ax.set_title("기술통계 박스플롯", fontsize=13, fontweight="bold")
-    ax.set_ylabel("값")
+    ax.set_title("기술통계 박스플롯", fontsize=13, fontweight="bold",
+                  fontproperties=fp if fp else None)
+    ax.set_ylabel("값", fontproperties=fp if fp else None)
+    _apply_font_to_ax(ax, fp)
     fig.tight_layout()
 
     return desc.reset_index(), _fig_to_bytes(fig)
@@ -79,21 +119,28 @@ def frequency_analysis_quant(df: pd.DataFrame, column: str) -> tuple[pd.DataFram
     freq["비율(%)"] = (freq["빈도"] / freq["빈도"].sum() * 100).round(2)
     freq["누적비율(%)"] = freq["비율(%)"].cumsum().round(2)
 
-    _set_korean_font()
+    fp = _get_font_prop()
     fig, axes = plt.subplots(1, 2, figsize=(12, 5))
 
     # 막대그래프
     axes[0].bar(freq["값"].astype(str), freq["빈도"], color="#4C72B0", alpha=0.8)
-    axes[0].set_title(f"{column} 빈도 분포", fontsize=12, fontweight="bold")
-    axes[0].set_xlabel(column)
-    axes[0].set_ylabel("빈도")
+    axes[0].set_title(f"{column} 빈도 분포", fontsize=12, fontweight="bold",
+                       fontproperties=fp if fp else None)
+    axes[0].set_xlabel(column, fontproperties=fp if fp else None)
+    axes[0].set_ylabel("빈도", fontproperties=fp if fp else None)
     axes[0].tick_params(axis="x", rotation=45)
+    _apply_font_to_ax(axes[0], fp)
 
     # 파이차트
-    axes[1].pie(freq["빈도"], labels=freq["값"].astype(str),
-                autopct="%1.1f%%", startangle=90,
-                colors=sns.color_palette("Blues_d", len(freq)))
-    axes[1].set_title(f"{column} 비율", fontsize=12, fontweight="bold")
+    wedges, texts, autotexts = axes[1].pie(
+        freq["빈도"], labels=freq["값"].astype(str),
+        autopct="%1.1f%%", startangle=90,
+        colors=sns.color_palette("Blues_d", len(freq)))
+    if fp:
+        for t in texts + autotexts:
+            t.set_fontproperties(fp)
+    axes[1].set_title(f"{column} 비율", fontsize=12, fontweight="bold",
+                       fontproperties=fp if fp else None)
 
     fig.tight_layout()
     return freq, _fig_to_bytes(fig)
@@ -127,13 +174,15 @@ def correlation_analysis(df: pd.DataFrame, columns: list,
     pval_df = pd.DataFrame(pval_data)
 
     # 히트맵
-    _set_korean_font()
+    fp = _get_font_prop()
     fig, ax = plt.subplots(figsize=(max(6, len(cols) * 0.9 + 2), max(5, len(cols) * 0.9)))
     mask = np.triu(np.ones_like(corr_matrix, dtype=bool))
     sns.heatmap(corr_matrix, ax=ax, annot=True, fmt=".2f", cmap="RdBu_r",
                 vmin=-1, vmax=1, mask=mask,
-                linewidths=0.5, annot_kws={"size": 10})
-    ax.set_title(f"상관관계 히트맵 ({method.capitalize()})", fontsize=13, fontweight="bold")
+                linewidths=0.5, annot_kws={"size": 10, "fontproperties": fp} if fp else {"size": 10})
+    ax.set_title(f"상관관계 히트맵 ({method.capitalize()})", fontsize=13, fontweight="bold",
+                  fontproperties=fp if fp else None)
+    _apply_font_to_ax(ax, fp)
     fig.tight_layout()
 
     return corr_matrix.reset_index().rename(columns={"index": "변수"}), pval_df, _fig_to_bytes(fig)
@@ -176,19 +225,17 @@ def ttest_independent(df: pd.DataFrame, value_col: str,
     })
 
     # 박스플롯
-    _set_korean_font()
+    fp = _get_font_prop()
     fig, ax = plt.subplots(figsize=(7, 5))
-    plot_df = pd.DataFrame({
-        str(groups[0]): g1.values[:max(len(g1), len(g2))],
-        str(groups[1]): g2.values[:max(len(g1), len(g2))],
-    })
     plot_df_melt = pd.DataFrame({"값": pd.concat([g1, g2]).values,
                                   "집단": [str(groups[0])] * len(g1) + [str(groups[1])] * len(g2)})
     sns.boxplot(data=plot_df_melt, x="집단", y="값", ax=ax,
                 palette=["#4C72B0", "#DD8452"], width=0.5)
-    ax.set_title(f"독립표본 T-검정\n{value_col} (p={p_val:.4f}{sig})", fontsize=12, fontweight="bold")
-    ax.set_xlabel(group_col)
-    ax.set_ylabel(value_col)
+    ax.set_title(f"독립표본 T-검정\n{value_col} (p={p_val:.4f}{sig})", fontsize=12, fontweight="bold",
+                  fontproperties=fp if fp else None)
+    ax.set_xlabel(group_col, fontproperties=fp if fp else None)
+    ax.set_ylabel(value_col, fontproperties=fp if fp else None)
+    _apply_font_to_ax(ax, fp)
     fig.tight_layout()
 
     return result, _fig_to_bytes(fig)
@@ -213,15 +260,20 @@ def ttest_paired(df: pd.DataFrame, col1: str, col2: str) -> tuple[pd.DataFrame, 
         ]
     })
 
-    _set_korean_font()
+    fp = _get_font_prop()
     fig, ax = plt.subplots(figsize=(7, 5))
     diff = g1 - g2
     ax.hist(diff, bins=15, color="#4C72B0", alpha=0.7, edgecolor="white")
     ax.axvline(0, color="red", linestyle="--", linewidth=1.5, label="차이=0")
     ax.axvline(diff.mean(), color="orange", linestyle="-", linewidth=1.5, label=f"평균차이={diff.mean():.3f}")
-    ax.set_title(f"대응표본 T-검정: {col1} − {col2}\n(p={p_val:.4f}{sig})", fontsize=12, fontweight="bold")
-    ax.set_xlabel("차이값")
-    ax.legend()
+    ax.set_title(f"대응표본 T-검정: {col1} − {col2}\n(p={p_val:.4f}{sig})", fontsize=12, fontweight="bold",
+                  fontproperties=fp if fp else None)
+    ax.set_xlabel("차이값", fontproperties=fp if fp else None)
+    legend = ax.legend()
+    if fp:
+        for text in legend.get_texts():
+            text.set_fontproperties(fp)
+    _apply_font_to_ax(ax, fp)
     fig.tight_layout()
 
     return result, _fig_to_bytes(fig)
@@ -265,7 +317,7 @@ def anova_oneway(df: pd.DataFrame, value_col: str,
         pass
 
     # 박스플롯
-    _set_korean_font()
+    fp = _get_font_prop()
     fig, ax = plt.subplots(figsize=(max(8, len(groups) * 1.5), 5))
     plot_data = [v for v in groups.values()]
     bp = ax.boxplot(plot_data, labels=list(groups.keys()), patch_artist=True, notch=False)
@@ -274,10 +326,11 @@ def anova_oneway(df: pd.DataFrame, value_col: str,
         patch.set_facecolor(color)
         patch.set_alpha(0.7)
     ax.set_title(f"ANOVA: {value_col} by {group_col}\n(F={f_stat:.3f}, p={p_val:.4f}{sig})",
-                 fontsize=12, fontweight="bold")
-    ax.set_xlabel(group_col)
-    ax.set_ylabel(value_col)
+                 fontsize=12, fontweight="bold", fontproperties=fp if fp else None)
+    ax.set_xlabel(group_col, fontproperties=fp if fp else None)
+    ax.set_ylabel(value_col, fontproperties=fp if fp else None)
     ax.tick_params(axis="x", rotation=30)
+    _apply_font_to_ax(ax, fp)
     fig.tight_layout()
 
     return pd.concat([anova_result, pd.DataFrame([{"항목": "---집단별 통계---", "값": ""}]),
@@ -317,7 +370,7 @@ def simple_regression(df: pd.DataFrame, y_col: str,
     })
 
     # 산점도 + 회귀선
-    _set_korean_font()
+    fp = _get_font_prop()
     fig, axes = plt.subplots(1, 2, figsize=(12, 5))
 
     # 산점도
@@ -326,18 +379,23 @@ def simple_regression(df: pd.DataFrame, y_col: str,
     axes[0].plot(x_range, model.params.iloc[0] + model.params.iloc[1] * x_range,
                  color="red", linewidth=2, label=f"y={model.params.iloc[0]:.3f}+{model.params.iloc[1]:.3f}x")
     axes[0].set_title(f"회귀분석: {y_col} ~ {x_col}\n(R²={model.rsquared:.3f})",
-                      fontsize=12, fontweight="bold")
-    axes[0].set_xlabel(x_col)
-    axes[0].set_ylabel(y_col)
-    axes[0].legend()
+                      fontsize=12, fontweight="bold", fontproperties=fp if fp else None)
+    axes[0].set_xlabel(x_col, fontproperties=fp if fp else None)
+    axes[0].set_ylabel(y_col, fontproperties=fp if fp else None)
+    legend0 = axes[0].legend()
+    if fp:
+        for t in legend0.get_texts():
+            t.set_fontproperties(fp)
+    _apply_font_to_ax(axes[0], fp)
 
     # 잔차 플롯
     residuals = model.resid
     axes[1].scatter(model.fittedvalues, residuals, alpha=0.5, color="#DD8452", s=30)
     axes[1].axhline(0, color="red", linestyle="--")
-    axes[1].set_title("잔차 플롯", fontsize=12, fontweight="bold")
-    axes[1].set_xlabel("예측값")
-    axes[1].set_ylabel("잔차")
+    axes[1].set_title("잔차 플롯", fontsize=12, fontweight="bold", fontproperties=fp if fp else None)
+    axes[1].set_xlabel("예측값", fontproperties=fp if fp else None)
+    axes[1].set_ylabel("잔차", fontproperties=fp if fp else None)
+    _apply_font_to_ax(axes[1], fp)
 
     fig.tight_layout()
     return result, _fig_to_bytes(fig)
@@ -393,7 +451,7 @@ def logistic_regression(df: pd.DataFrame, y_col: str,
     result_df = pd.DataFrame(result_rows + summary_rows)
 
     # Odds Ratio 시각화
-    _set_korean_font()
+    fp = _get_font_prop()
     x_vars = [v for v in params.index if v != "const"]
     if x_vars:
         fig, ax = plt.subplots(figsize=(8, max(4, len(x_vars) * 0.7 + 1)))
@@ -407,10 +465,15 @@ def logistic_regression(df: pd.DataFrame, y_col: str,
                 capsize=4, align="center")
         ax.axvline(1, color="red", linestyle="--", linewidth=1.5, label="OR=1 (기준)")
         ax.set_yticks(list(y_pos))
-        ax.set_yticklabels(x_vars)
-        ax.set_xlabel("Odds Ratio (95% CI)")
-        ax.set_title("로지스틱 회귀: Odds Ratio", fontsize=12, fontweight="bold")
-        ax.legend()
+        ax.set_yticklabels(x_vars, fontproperties=fp if fp else None)
+        ax.set_xlabel("Odds Ratio (95% CI)", fontproperties=fp if fp else None)
+        ax.set_title("로지스틱 회귀: Odds Ratio", fontsize=12, fontweight="bold",
+                      fontproperties=fp if fp else None)
+        legend = ax.legend()
+        if fp:
+            for t in legend.get_texts():
+                t.set_fontproperties(fp)
+        _apply_font_to_ax(ax, fp)
         fig.tight_layout()
         return result_df, _fig_to_bytes(fig)
 

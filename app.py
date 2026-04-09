@@ -194,7 +194,7 @@ with tab2:
                     chart_bytes = plot_frequency_bar(freq_df)
                     st.image(chart_bytes, use_container_width=True)
                 # 다운로드
-                st.download_button("📥 빈도표 CSV 다운로드", freq_df.to_csv(index=False, encoding="utf-8-sig"),
+                st.download_button("📥 빈도표 CSV 다운로드", freq_df.to_csv(index=False).encode("utf-8-sig"),
                                    "keyword_freq.csv", "text/csv")
 
             elif analysis_type == "TF-IDF":
@@ -213,7 +213,7 @@ with tab2:
                             title="TF-IDF 상위 키워드"
                         )
                         st.image(chart_bytes, use_container_width=True)
-                    st.download_button("📥 TF-IDF표 CSV 다운로드", tfidf_df.to_csv(index=False, encoding="utf-8-sig"),
+                    st.download_button("📥 TF-IDF표 CSV 다운로드", tfidf_df.to_csv(index=False).encode("utf-8-sig"),
                                        "tfidf.csv", "text/csv")
 
             else:
@@ -262,7 +262,7 @@ with tab3:
                 st.subheader("📋 중심성 지표")
                 st.dataframe(centrality_df.head(20), use_container_width=True)
                 st.download_button("📥 중심성 CSV 다운로드",
-                                   centrality_df.to_csv(index=False, encoding="utf-8-sig"),
+                                   centrality_df.to_csv(index=False).encode("utf-8-sig"),
                                    "centrality.csv", "text/csv")
 
 
@@ -314,7 +314,7 @@ with tab4:
                     st.subheader("📋 토픽 요약")
                     st.dataframe(topics_df, use_container_width=True)
                     st.download_button("📥 토픽표 CSV 다운로드",
-                                       topics_df.to_csv(index=False, encoding="utf-8-sig"),
+                                       topics_df.to_csv(index=False).encode("utf-8-sig"),
                                        "topics.csv", "text/csv")
 
                     st.subheader("📊 토픽별 상세 키워드")
@@ -373,7 +373,7 @@ with tab5:
                     st.image(chart_bytes, use_container_width=True)
                     st.download_button("📥 그래프 PNG 다운로드", chart_bytes, "desc_stat.png", "image/png")
                 st.download_button("📥 결과표 CSV 다운로드",
-                                   result_df.to_csv(index=False, encoding="utf-8-sig"),
+                                   result_df.to_csv(index=False).encode("utf-8-sig"),
                                    "desc_stats.csv", "text/csv")
                 st.session_state.quant_summary += f"\n[기술통계] 분석 변수: {', '.join(selected)}\n{result_df.to_string(index=False)}"
 
@@ -389,7 +389,7 @@ with tab5:
                     st.image(chart_bytes, use_container_width=True)
                     st.download_button("📥 그래프 PNG 다운로드", chart_bytes, "freq.png", "image/png")
                 st.download_button("📥 결과표 CSV 다운로드",
-                                   result_df.to_csv(index=False, encoding="utf-8-sig"),
+                                   result_df.to_csv(index=False).encode("utf-8-sig"),
                                    "freq.csv", "text/csv")
 
         # ── 상관관계 ──────────────────────────────────────────
@@ -409,7 +409,7 @@ with tab5:
                     st.image(chart_bytes, use_container_width=True)
                     st.download_button("📥 히트맵 PNG 다운로드", chart_bytes, "corr_heatmap.png", "image/png")
                 st.download_button("📥 상관행렬 CSV 다운로드",
-                                   corr_df.to_csv(index=False, encoding="utf-8-sig"),
+                                   corr_df.to_csv(index=False).encode("utf-8-sig"),
                                    "correlation.csv", "text/csv")
                 st.session_state.quant_summary += f"\n[상관분석({corr_method})] 변수: {', '.join(selected)}"
 
@@ -426,7 +426,7 @@ with tab5:
                     st.image(chart_bytes, use_container_width=True)
                     st.download_button("📥 그래프 PNG 다운로드", chart_bytes, "ttest.png", "image/png")
                 st.download_button("📥 결과표 CSV 다운로드",
-                                   result_df.to_csv(index=False, encoding="utf-8-sig"),
+                                   result_df.to_csv(index=False).encode("utf-8-sig"),
                                    "ttest.csv", "text/csv")
                 st.session_state.quant_summary += f"\n[독립표본 T검정] {val_col} by {grp_col}:\n{result_df.to_string(index=False)}"
 
@@ -443,7 +443,7 @@ with tab5:
                     st.image(chart_bytes, use_container_width=True)
                     st.download_button("📥 그래프 PNG 다운로드", chart_bytes, "paired_ttest.png", "image/png")
                 st.download_button("📥 결과표 CSV 다운로드",
-                                   result_df.to_csv(index=False, encoding="utf-8-sig"),
+                                   result_df.to_csv(index=False).encode("utf-8-sig"),
                                    "paired_ttest.csv", "text/csv")
                 st.session_state.quant_summary += f"\n[대응표본 T검정] {col_a} vs {col_b}:\n{result_df.to_string(index=False)}"
 
@@ -463,7 +463,7 @@ with tab5:
                     st.image(chart_bytes, use_container_width=True)
                     st.download_button("📥 그래프 PNG 다운로드", chart_bytes, "anova.png", "image/png")
                 st.download_button("📥 결과표 CSV 다운로드",
-                                   result_df.to_csv(index=False, encoding="utf-8-sig"),
+                                   result_df.to_csv(index=False).encode("utf-8-sig"),
                                    "anova.csv", "text/csv")
                 st.session_state.quant_summary += f"\n[ANOVA] {val_col} by {grp_col}:\n{result_df.to_string(index=False)}"
 
@@ -480,7 +480,7 @@ with tab5:
                     st.image(chart_bytes, use_container_width=True)
                     st.download_button("📥 그래프 PNG 다운로드", chart_bytes, "regression.png", "image/png")
                 st.download_button("📥 결과표 CSV 다운로드",
-                                   result_df.to_csv(index=False, encoding="utf-8-sig"),
+                                   result_df.to_csv(index=False).encode("utf-8-sig"),
                                    "regression.csv", "text/csv")
                 st.session_state.quant_summary += f"\n[단순회귀] {y_col}~{x_col}:\n{result_df.to_string(index=False)}"
 
@@ -500,7 +500,7 @@ with tab5:
                     st.image(chart_bytes, use_container_width=True)
                     st.download_button("📥 그래프 PNG 다운로드", chart_bytes, "logit.png", "image/png")
                 st.download_button("📥 결과표 CSV 다운로드",
-                                   result_df.to_csv(index=False, encoding="utf-8-sig"),
+                                   result_df.to_csv(index=False).encode("utf-8-sig"),
                                    "logistic.csv", "text/csv")
                 st.session_state.quant_summary += f"\n[로지스틱 회귀] {y_col}~{'+'.join(x_cols)}:\n{result_df.to_string(index=False)}"
 
