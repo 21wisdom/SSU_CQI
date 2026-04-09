@@ -1,106 +1,142 @@
 """
-Claude API 기반 AI 리포트 생성 모듈
-스트리밍 방식으로 6섹션 리포트 생성
+WISDOM Lab - AI 리포트 생성 모듈
+문서유형(학술논문 / 정부보고서 / 연구보고서) × 어조 선택 지원
 """
 
-import os
+import anthropic
 from typing import Generator
 
+# ── 문서 유형별 시스템 프롬프트 ───────────────────────────────
+_SYSTEM_PROMPTS = {
+    "academic": """당신은 교육학, 사회과학 분야의 학술논문 작성을 지원하는 AI 연구 어시스턴트입니다.
+분석 결과를 바탕으로 학술논문 본문 수준의 텍스트를 작성합니다.
+- 어조: 3인칭 객관적 서술 (예: ~로 나타났다, ~임을 확인하였다, ~분석하였다)
+- 문체: 격식체, 학술 용어 사용, 통계 수치를 정확히 인용
+- 구조: 서론적 맥락 → 분석결과 기술 → 해석 → 시사점 순서로 전개
+- KCI·APA 스타일에 준하는 결과 기술 방식 적용""",
 
-REPORT_SYSTEM_PROMPT = """당신은 대학 강의 품질 개선(CQI: Continuous Quality Improvement)을 전문으로 하는
-교육학 전문가이자 데이터 분석가입니다. 강의평가 텍스트 분석 결과를 바탕으로
-교수자와 교육 담당자에게 실질적으로 도움이 되는 심층 리포트를 작성합니다.
+    "government": """당신은 정부부처 및 공공기관 보고서 작성을 지원하는 AI 어시스턴트입니다.
+분석 결과를 정부보고서 형식으로 작성합니다.
+- 어조: 개조식, 명사형 종결 (-함, -임, -됨, -필요함)
+- 문체: 간결하고 명확한 서술, 불필요한 수식어 배제
+- 구조: 핵심 사항을 먼저 제시(두괄식), 이후 세부 내용을 불릿으로 나열
+- 숫자와 통계치를 전면에 제시하고 해석을 간략히 덧붙임""",
 
-리포트는 다음 6개 섹션으로 구성하세요:
+    "research": """당신은 연구기관 및 싱크탱크의 연구보고서 작성을 지원하는 AI 어시스턴트입니다.
+분석 결과를 연구보고서 형식으로 작성합니다.
+- 어조: 혼합형 — 본문은 서술체(-하였다, -나타났다), 소결·시사점은 개조식(-함) 혼용
+- 문체: 학술논문보다 평이하고 정부보고서보다 풍부한 서술
+- 구조: 연구배경 → 분석결과 → 주요 발견 → 정책·실무 시사점
+- 독자: 정책 담당자, 연구자, 실무자를 함께 고려""",
+}
 
-## 1. 종합 진단 (Executive Summary)
-- 전반적인 학습자 반응 패턴 요약
-- 주요 긍정/개선 키워드 해석
-- 전체 강의 품질 진단 (강점/약점)
+_SECTION_TEMPLATES = {
+    "academic": """## 1. 분석 개요 및 연구 배경
+## 2. 텍스트 분석 결과
+## 3. 정량 분석 결과
+## 4. 종합 논의
+## 5. 결론 및 제언""",
 
-## 2. 학습자 페르소나 분석
-- 키워드 패턴 기반 3~4개 학습자 유형 도출
-- 각 유형의 특성, 요구사항, 학습 행동 기술
+    "government": """## 1. 분석 개요
+## 2. 주요 분석 결과
+## 3. 정책적 시사점
+## 4. 제언""",
 
-## 3. 진로·취업 연계성 분석
-- 실무 역량 관련 키워드 분석
-- 진로 연계 강화 방안 제안
+    "research": """## 1. 연구 배경 및 목적
+## 2. 분석 결과 요약
+## 3. 주요 발견 및 해석
+## 4. 시사점
+## 5. 결론""",
+}
 
-## 4. 핵심역량 연계성 분석
-- 창의융합·의사소통·문제해결·자기주도 역량과의 연계
-- 역량별 강화 전략
-
-## 5. 강의 개선 추천
-- 교수학습 방법 개선안 (3가지 이상)
-- 강의 내용 개선안 (3가지 이상)
-- 우선순위와 실행 로드맵
-
-## 6. 참고자료 및 최신 동향
-- 관련 교육학 이론 및 연구 동향
-- 유사 사례 및 벤치마킹 방향
-
-각 섹션을 구체적이고 실행 가능한 내용으로 작성하세요."""
+_DOC_LABELS = {
+    "academic": "학술논문",
+    "government": "정부보고서",
+    "research": "연구보고서",
+}
 
 
-def build_analysis_summary(freq_df, tfidf_df, topics_df, meta: dict) -> str:
-    """분석 결과를 텍스트 요약으로 변환"""
-    lines = [f"=== 강의평가 분석 결과 요약 ==="]
-    lines.append(f"총 응답 수: {meta.get('total_docs', 'N/A')}개")
+def _build_data_summary(freq_df, tfidf_df, topics_df, quant_summary: str, meta: dict) -> str:
+    parts = []
+    subject = meta.get("subject", "")
+    doc_label = _DOC_LABELS.get(meta.get("doc_type", "research"), "연구보고서")
+    parts.append(
+        f"[분석 개요]\n"
+        f"- 문서 유형: {doc_label}\n"
+        f"- 분석 주제: {subject or '미입력'}\n"
+        f"- 총 문서 수: {meta.get('total_docs', 0)}건\n"
+    )
 
     if freq_df is not None and not freq_df.empty:
-        top_kw = freq_df.head(15)["키워드"].tolist()
-        lines.append(f"\n【빈도 상위 키워드】: {', '.join(top_kw)}")
+        top5 = freq_df.head(5)
+        kw_str = ", ".join(f"{r.iloc[0]}({r.iloc[1]}회)" for _, r in top5.iterrows())
+        parts.append(f"[키워드 빈도 상위 5개]\n{kw_str}\n")
 
     if tfidf_df is not None and not tfidf_df.empty:
-        top_tfidf = tfidf_df.head(10)["키워드"].tolist()
-        lines.append(f"\n【TF-IDF 상위 키워드】: {', '.join(top_tfidf)}")
+        top5t = tfidf_df.head(5)
+        tf_str = ", ".join(f"{r.iloc[0]}({r.iloc[1]:.3f})" for _, r in top5t.iterrows())
+        parts.append(f"[TF-IDF 상위 5개]\n{tf_str}\n")
 
     if topics_df is not None and not topics_df.empty:
-        lines.append("\n【토픽 모델링 결과】")
+        topic_lines = []
         for _, row in topics_df.iterrows():
-            lines.append(f"  - {row['토픽 번호']}: {row['핵심 단어']}")
+            topic_lines.append(
+                f"  - {row.get('토픽 번호','')}: "
+                f"대표어={row.get('대표 키워드','')}, "
+                f"키워드={row.get('핵심 단어','')}"
+            )
+        parts.append("[NMF 토픽 분석 결과]\n" + "\n".join(topic_lines) + "\n")
 
-    if meta.get("subject"):
-        lines.append(f"\n과목명: {meta['subject']}")
+    if quant_summary:
+        parts.append(f"[정량 분석 요약]\n{quant_summary}\n")
 
-    return "\n".join(lines)
+    return "\n".join(parts)
 
 
 def generate_report_stream(
-    freq_df, tfidf_df, topics_df, meta: dict, api_key: str
+    freq_df,
+    tfidf_df,
+    topics_df,
+    quant_summary: str,
+    meta: dict,
+    api_key: str,
+    doc_type: str = "research",
 ) -> Generator[str, None, None]:
     """
-    Claude API 스트리밍으로 AI 리포트 생성
-    Yields: 텍스트 청크
+    스트리밍 방식으로 AI 리포트를 생성합니다.
+    doc_type: 'academic' | 'government' | 'research'
     """
-    try:
-        import anthropic
-    except ImportError:
-        yield "anthropic 패키지가 설치되어 있지 않습니다. pip install anthropic"
-        return
-
     if not api_key:
-        yield "API 키가 설정되지 않았습니다. .env 파일에 ANTHROPIC_API_KEY를 입력하세요."
+        yield "API 키가 설정되지 않았습니다."
         return
 
-    client = anthropic.Anthropic(api_key=api_key)
-    analysis_summary = build_analysis_summary(freq_df, tfidf_df, topics_df, meta)
+    try:
+        client = anthropic.Anthropic(api_key=api_key)
+    except Exception as e:
+        yield f"API 클라이언트 초기화 오류: {e}"
+        return
 
-    user_message = f"""다음 강의평가 분석 결과를 바탕으로 CQI 개선 리포트를 작성해주세요.
+    system_prompt = _SYSTEM_PROMPTS.get(doc_type, _SYSTEM_PROMPTS["research"])
+    sections = _SECTION_TEMPLATES.get(doc_type, _SECTION_TEMPLATES["research"])
+    doc_label = _DOC_LABELS.get(doc_type, "연구보고서")
+    data_summary = _build_data_summary(freq_df, tfidf_df, topics_df, quant_summary, {**meta, "doc_type": doc_type})
 
-{analysis_summary}
-
-위 분석 결과를 종합하여 6개 섹션으로 구성된 상세한 CQI 리포트를 작성해주세요.
-각 섹션은 교수자가 바로 실행할 수 있는 구체적인 내용을 포함해야 합니다."""
+    user_message = (
+        f"아래 분석 데이터를 바탕으로 **{doc_label}** 형식의 리포트를 작성해 주세요.\n\n"
+        f"{data_summary}\n"
+        f"[요청 리포트 구조]\n{sections}\n\n"
+        "각 섹션을 충실히 작성하되, 분석 결과에서 확인된 수치와 키워드를 구체적으로 인용하세요. "
+        "통계적으로 유의미한 결과는 반드시 강조하고, 연구·정책적 의미를 제시하세요."
+    )
 
     try:
         with client.messages.stream(
             model="claude-opus-4-6",
-            max_tokens=4096,
-            system=REPORT_SYSTEM_PROMPT,
+            max_tokens=3000,
+            system=system_prompt,
             messages=[{"role": "user", "content": user_message}],
         ) as stream:
             for text in stream.text_stream:
                 yield text
     except Exception as e:
-        yield f"\n\n오류가 발생했습니다: {str(e)}"
+        yield f"\n\n오류 발생: {str(e)}"
