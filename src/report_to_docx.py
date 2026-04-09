@@ -157,10 +157,12 @@ def _parse_table_rows(lines: list, start: int):
 
 
 def _add_table(doc: Document, header: list, body: list):
-    """Word 표 생성"""
+    """Word 표 생성 (넓은 표는 폰트 자동 축소)"""
     if not header:
         return
     cols = len(header)
+    # 열 수에 따라 폰트 크기 조정 (A4 가로 공간 보존)
+    cell_font = 10.5 if cols <= 4 else (9.0 if cols <= 7 else 8.0)
 
     # 테두리 설정 헬퍼
     def _set_cell_border(cell):
@@ -205,7 +207,7 @@ def _add_table(doc: Document, header: list, body: list):
         tcPr.append(shd)
         p = cell.paragraphs[0]
         run = p.add_run(cell_text)
-        _set_korean_font(run, 10.5, bold=True, color=RGBColor(0x1F, 0x49, 0x7D))
+        _set_korean_font(run, cell_font, bold=True, color=RGBColor(0x1F, 0x49, 0x7D))
         p.paragraph_format.space_before = Pt(2)
         p.paragraph_format.space_after = Pt(2)
 
@@ -218,7 +220,7 @@ def _add_table(doc: Document, header: list, body: list):
             cell.text = ""
             _set_cell_border(cell)
             p = cell.paragraphs[0]
-            _add_inline_runs(p, cell_text, 10.5)
+            _add_inline_runs(p, cell_text, cell_font)
             p.paragraph_format.space_before = Pt(2)
             p.paragraph_format.space_after = Pt(2)
 
@@ -295,6 +297,22 @@ def markdown_to_docx_bytes(
 
     # ── 본문 파싱 ─────────────────────────────────────────────
     lines = md_text.split("\n")
+
+    # 선행 # 제목 줄 스킵: Ⅰ. 첫 등장 이전의 단순 # 줄은 표지 중복이므로 제거
+    first_h1_idx = None
+    for idx, ln in enumerate(lines):
+        if _RE_H1.match(ln.strip()):
+            first_h1_idx = idx
+            break
+    if first_h1_idx is not None:
+        # Ⅰ. 이전의 # 으로 시작하는 줄 제거 (cover 중복 방지)
+        cleaned = []
+        for idx, ln in enumerate(lines):
+            if idx < first_h1_idx and ln.strip().startswith("#"):
+                continue   # 스킵
+            cleaned.append(ln)
+        lines = cleaned
+
     i = 0
     while i < len(lines):
         raw = lines[i]
@@ -333,7 +351,7 @@ def markdown_to_docx_bytes(
             i += 1
             continue
 
-        # 마크다운 ## / # 제목 (AI가 혼용하는 경우 대비)
+        # 마크다운 ## / # 제목 (AI가 혼용하는 경우 대비 — Ⅰ. 이후이므로 섹션 제목으로 처리)
         if line.startswith("### "):
             _add_h3(doc, line[4:].strip())
             i += 1
@@ -343,6 +361,7 @@ def markdown_to_docx_bytes(
             i += 1
             continue
         if line.startswith("# ") and not line.startswith("## "):
+            # Ⅰ. 이후 등장하는 # 은 대제목 보조 역할로 처리
             _add_h1(doc, line[2:].strip())
             i += 1
             continue
