@@ -43,7 +43,9 @@ defaults = {
     "topics_df": None,
     "nmf_model": None,
     "quant_df": None,       # 정량 데이터프레임
-    "quant_summary": "",    # AI 리포트용 정량 결과 요약
+    "quant_summary": "",    # AI 리포트용 정량 결과 요약 (레거시)
+    "quant_results": [],    # AI 리포트용 정량 결과 목록
+    "last_report": "",      # 마지막 생성 리포트
     "text_df": None,
 }
 for k, v in defaults.items():
@@ -331,7 +333,7 @@ with tab4:
 # ══════════════════════════════════════════════════════════════
 with tab5:
     st.header("📊 정량 분석")
-    st.caption("기술통계·빈도·상관·T검정·ANOVA·단순회귀·로지스틱 회귀 분석 및 시각화")
+    st.caption("분석 방법을 복수로 선택하여 한 번에 실행할 수 있습니다.")
 
     if st.session_state.quant_df is None:
         st.info("먼저 [📂 데이터 업로드] 탭에서 데이터를 업로드하세요.")
@@ -340,169 +342,181 @@ with tab5:
         num_cols = df_q.select_dtypes(include="number").columns.tolist()
         all_cols = df_q.columns.tolist()
 
-        analysis_method = st.selectbox(
-            "분석 방법 선택",
-            [
-                "기술통계 (Descriptive Statistics)",
-                "빈도분석 (Frequency Analysis)",
-                "상관관계 분석 (Correlation)",
-                "독립표본 T-검정 (Independent T-test)",
-                "대응표본 T-검정 (Paired T-test)",
-                "분산분석 ANOVA (One-way)",
-                "단순선형회귀 (Simple Regression)",
-                "로지스틱 회귀 (Logistic Regression)",
-            ],
-        )
-
-        st.markdown("---")
         from src.quant_analyzer import (
             descriptive_stats, frequency_analysis_quant, correlation_analysis,
             ttest_independent, ttest_paired, anova_oneway,
             simple_regression, logistic_regression,
         )
 
-        # ── 기술통계 ──────────────────────────────────────────
-        if analysis_method.startswith("기술통계"):
-            selected = st.multiselect("분석할 수치형 변수 선택", num_cols, default=num_cols[:min(5, len(num_cols))])
-            if st.button("▶ 분석 실행", type="primary") and selected:
-                with st.spinner("분석 중..."):
-                    result_df, chart_bytes = descriptive_stats(df_q, selected)
-                st.subheader("기술통계 결과")
-                st.dataframe(result_df, use_container_width=True)
-                if chart_bytes:
-                    st.image(chart_bytes, use_container_width=True)
-                    st.download_button("📥 그래프 PNG 다운로드", chart_bytes, "desc_stat.png", "image/png")
-                st.download_button("📥 결과표 CSV 다운로드",
-                                   result_df.to_csv(index=False).encode("utf-8-sig"),
-                                   "desc_stats.csv", "text/csv")
-                st.session_state.quant_summary += f"\n[기술통계] 분석 변수: {', '.join(selected)}\n{result_df.to_string(index=False)}"
+        ALL_METHODS = [
+            "기술통계 (Descriptive Statistics)",
+            "빈도분석 (Frequency Analysis)",
+            "상관관계 분석 (Correlation)",
+            "독립표본 T-검정 (Independent T-test)",
+            "대응표본 T-검정 (Paired T-test)",
+            "분산분석 ANOVA (One-way)",
+            "단순선형회귀 (Simple Regression)",
+            "로지스틱 회귀 (Logistic Regression)",
+        ]
 
-        # ── 빈도분석 ──────────────────────────────────────────
-        elif analysis_method.startswith("빈도분석"):
-            col_sel = st.selectbox("분석할 변수 선택", all_cols)
-            if st.button("▶ 분석 실행", type="primary"):
-                with st.spinner("분석 중..."):
-                    result_df, chart_bytes = frequency_analysis_quant(df_q, col_sel)
-                st.subheader(f"빈도분석: {col_sel}")
-                st.dataframe(result_df, use_container_width=True)
-                if chart_bytes:
-                    st.image(chart_bytes, use_container_width=True)
-                    st.download_button("📥 그래프 PNG 다운로드", chart_bytes, "freq.png", "image/png")
-                st.download_button("📥 결과표 CSV 다운로드",
-                                   result_df.to_csv(index=False).encode("utf-8-sig"),
-                                   "freq.csv", "text/csv")
+        selected_methods = st.multiselect(
+            "분석 방법 선택 (복수 선택 가능)",
+            ALL_METHODS,
+            placeholder="분석 방법을 하나 이상 선택하세요",
+        )
 
-        # ── 상관관계 ──────────────────────────────────────────
-        elif analysis_method.startswith("상관관계"):
-            corr_method = st.radio("상관 방법", ["pearson", "spearman"], horizontal=True)
-            selected = st.multiselect("분석할 수치형 변수 선택 (2개 이상)", num_cols,
-                                       default=num_cols[:min(6, len(num_cols))])
-            if st.button("▶ 분석 실행", type="primary") and len(selected) >= 2:
-                with st.spinner("분석 중..."):
-                    corr_df, pval_df, chart_bytes = correlation_analysis(df_q, selected, corr_method)
-                st.subheader("상관계수 행렬")
-                st.dataframe(corr_df, use_container_width=True)
-                st.subheader("p-value 행렬")
-                st.dataframe(pval_df, use_container_width=True)
-                st.caption("* p<.05  ** p<.01  *** p<.001")
-                if chart_bytes:
-                    st.image(chart_bytes, use_container_width=True)
-                    st.download_button("📥 히트맵 PNG 다운로드", chart_bytes, "corr_heatmap.png", "image/png")
-                st.download_button("📥 상관행렬 CSV 다운로드",
-                                   corr_df.to_csv(index=False).encode("utf-8-sig"),
-                                   "correlation.csv", "text/csv")
-                st.session_state.quant_summary += f"\n[상관분석({corr_method})] 변수: {', '.join(selected)}"
+        # ── 선택된 각 방법의 설정 UI ──────────────────────────
+        method_configs = {}
+        for idx, method in enumerate(selected_methods):
+            with st.expander(f"**{method}** 설정", expanded=True):
+                cfg = {}
+                if method.startswith("기술통계"):
+                    cfg["selected"] = st.multiselect(
+                        "분석할 수치형 변수", num_cols,
+                        default=num_cols[:min(5, len(num_cols))],
+                        key=f"desc_vars_{idx}")
+                elif method.startswith("빈도분석"):
+                    cfg["col"] = st.selectbox("분석할 변수", all_cols, key=f"freq_col_{idx}")
+                elif method.startswith("상관관계"):
+                    cfg["corr_method"] = st.radio("상관 방법", ["pearson", "spearman"],
+                                                   horizontal=True, key=f"corr_m_{idx}")
+                    cfg["selected"] = st.multiselect(
+                        "분석할 수치형 변수 (2개 이상)", num_cols,
+                        default=num_cols[:min(6, len(num_cols))],
+                        key=f"corr_vars_{idx}")
+                elif method.startswith("독립표본"):
+                    cfg["val_col"] = st.selectbox("종속변수 (수치형)", num_cols, key=f"tt_val_{idx}")
+                    cfg["grp_col"] = st.selectbox("집단변수 (2개 집단)", all_cols, key=f"tt_grp_{idx}")
+                elif method.startswith("대응표본"):
+                    cfg["col_a"] = st.selectbox("변수 A (사전/그룹1)", num_cols, index=0, key=f"pt_a_{idx}")
+                    cfg["col_b"] = st.selectbox("변수 B (사후/그룹2)", num_cols,
+                                                 index=min(1, len(num_cols)-1), key=f"pt_b_{idx}")
+                elif method.startswith("분산분석"):
+                    cfg["val_col"] = st.selectbox("종속변수 (수치형)", num_cols, key=f"an_val_{idx}")
+                    cfg["grp_col"] = st.selectbox("집단변수 (3개 이상 집단 권장)", all_cols, key=f"an_grp_{idx}")
+                elif method.startswith("단순선형"):
+                    cfg["y_col"] = st.selectbox("종속변수 Y", num_cols, index=0, key=f"reg_y_{idx}")
+                    cfg["x_col"] = st.selectbox("독립변수 X", num_cols,
+                                                 index=min(1, len(num_cols)-1), key=f"reg_x_{idx}")
+                elif method.startswith("로지스틱"):
+                    st.caption("종속변수는 0/1 이진 변수여야 합니다.")
+                    cfg["y_col"] = st.selectbox("종속변수 Y (0/1 이진)", num_cols, index=0, key=f"log_y_{idx}")
+                    other_cols = [c for c in num_cols if c != cfg["y_col"]]
+                    cfg["x_cols"] = st.multiselect("독립변수 X (복수 선택)", other_cols,
+                                                    default=other_cols[:min(3, len(other_cols))],
+                                                    key=f"log_x_{idx}")
+                method_configs[idx] = cfg
 
-        # ── 독립표본 T-검정 ───────────────────────────────────
-        elif analysis_method.startswith("독립표본"):
-            val_col = st.selectbox("종속변수 (수치형)", num_cols)
-            grp_col = st.selectbox("집단변수 (2개 집단)", all_cols)
-            if st.button("▶ 분석 실행", type="primary"):
-                with st.spinner("분석 중..."):
-                    result_df, chart_bytes = ttest_independent(df_q, val_col, grp_col)
-                st.subheader(f"독립표본 T-검정: {val_col} by {grp_col}")
-                st.dataframe(result_df, use_container_width=True)
-                if chart_bytes:
-                    st.image(chart_bytes, use_container_width=True)
-                    st.download_button("📥 그래프 PNG 다운로드", chart_bytes, "ttest.png", "image/png")
-                st.download_button("📥 결과표 CSV 다운로드",
-                                   result_df.to_csv(index=False).encode("utf-8-sig"),
-                                   "ttest.csv", "text/csv")
-                st.session_state.quant_summary += f"\n[독립표본 T검정] {val_col} by {grp_col}:\n{result_df.to_string(index=False)}"
+        st.markdown("---")
 
-        # ── 대응표본 T-검정 ───────────────────────────────────
-        elif analysis_method.startswith("대응표본"):
-            col_a = st.selectbox("변수 A (사전/그룹1)", num_cols, index=0)
-            col_b = st.selectbox("변수 B (사후/그룹2)", num_cols, index=min(1, len(num_cols)-1))
-            if st.button("▶ 분석 실행", type="primary"):
-                with st.spinner("분석 중..."):
-                    result_df, chart_bytes = ttest_paired(df_q, col_a, col_b)
-                st.subheader(f"대응표본 T-검정: {col_a} vs {col_b}")
-                st.dataframe(result_df, use_container_width=True)
-                if chart_bytes:
-                    st.image(chart_bytes, use_container_width=True)
-                    st.download_button("📥 그래프 PNG 다운로드", chart_bytes, "paired_ttest.png", "image/png")
-                st.download_button("📥 결과표 CSV 다운로드",
-                                   result_df.to_csv(index=False).encode("utf-8-sig"),
-                                   "paired_ttest.csv", "text/csv")
-                st.session_state.quant_summary += f"\n[대응표본 T검정] {col_a} vs {col_b}:\n{result_df.to_string(index=False)}"
+        if st.button("▶ 선택한 분석 모두 실행", type="primary",
+                      use_container_width=True, disabled=not selected_methods):
+            results = []
+            summary_parts = []
 
-        # ── ANOVA ─────────────────────────────────────────────
-        elif analysis_method.startswith("분산분석"):
-            val_col = st.selectbox("종속변수 (수치형)", num_cols)
-            grp_col = st.selectbox("집단변수 (3개 이상 집단 권장)", all_cols)
-            if st.button("▶ 분석 실행", type="primary"):
-                with st.spinner("ANOVA 분석 중..."):
-                    result_df, tukey_df, chart_bytes = anova_oneway(df_q, val_col, grp_col)
-                st.subheader(f"일원분산분석 (ANOVA): {val_col} by {grp_col}")
-                st.dataframe(result_df, use_container_width=True)
-                if not tukey_df.empty:
-                    st.subheader("📋 Tukey HSD 사후검정")
-                    st.dataframe(tukey_df, use_container_width=True)
-                if chart_bytes:
-                    st.image(chart_bytes, use_container_width=True)
-                    st.download_button("📥 그래프 PNG 다운로드", chart_bytes, "anova.png", "image/png")
-                st.download_button("📥 결과표 CSV 다운로드",
-                                   result_df.to_csv(index=False).encode("utf-8-sig"),
-                                   "anova.csv", "text/csv")
-                st.session_state.quant_summary += f"\n[ANOVA] {val_col} by {grp_col}:\n{result_df.to_string(index=False)}"
+            for idx, method in enumerate(selected_methods):
+                cfg = method_configs.get(idx, {})
+                entry = {"method": method, "label": method, "result_df": None,
+                         "extra_df": None, "chart_bytes": None, "summary_text": ""}
+                try:
+                    with st.spinner(f"{method} 분석 중..."):
+                        if method.startswith("기술통계"):
+                            sel = cfg.get("selected", [])
+                            if sel:
+                                entry["result_df"], entry["chart_bytes"] = descriptive_stats(df_q, sel)
+                                entry["summary_text"] = (
+                                    f"[기술통계] 분석 변수: {', '.join(sel)}\n"
+                                    f"{entry['result_df'].to_string(index=False)}"
+                                )
+                        elif method.startswith("빈도분석"):
+                            col = cfg.get("col", all_cols[0] if all_cols else "")
+                            entry["result_df"], entry["chart_bytes"] = frequency_analysis_quant(df_q, col)
+                            entry["summary_text"] = (
+                                f"[빈도분석] 변수: {col}\n"
+                                f"{entry['result_df'].to_string(index=False)}"
+                            )
+                        elif method.startswith("상관관계"):
+                            sel = cfg.get("selected", [])
+                            cm = cfg.get("corr_method", "pearson")
+                            if len(sel) >= 2:
+                                r, p, entry["chart_bytes"] = correlation_analysis(df_q, sel, cm)
+                                entry["result_df"] = r
+                                entry["extra_df"] = p
+                                entry["summary_text"] = f"[상관분석({cm})] 변수: {', '.join(sel)}\n{r.to_string()}"
+                        elif method.startswith("독립표본"):
+                            v, g = cfg.get("val_col", ""), cfg.get("grp_col", "")
+                            entry["result_df"], entry["chart_bytes"] = ttest_independent(df_q, v, g)
+                            entry["summary_text"] = (
+                                f"[독립표본 T검정] {v} by {g}:\n"
+                                f"{entry['result_df'].to_string(index=False)}"
+                            )
+                        elif method.startswith("대응표본"):
+                            a, b = cfg.get("col_a", ""), cfg.get("col_b", "")
+                            entry["result_df"], entry["chart_bytes"] = ttest_paired(df_q, a, b)
+                            entry["summary_text"] = (
+                                f"[대응표본 T검정] {a} vs {b}:\n"
+                                f"{entry['result_df'].to_string(index=False)}"
+                            )
+                        elif method.startswith("분산분석"):
+                            v, g = cfg.get("val_col", ""), cfg.get("grp_col", "")
+                            entry["result_df"], entry["extra_df"], entry["chart_bytes"] = anova_oneway(df_q, v, g)
+                            entry["summary_text"] = (
+                                f"[ANOVA] {v} by {g}:\n"
+                                f"{entry['result_df'].to_string(index=False)}"
+                            )
+                        elif method.startswith("단순선형"):
+                            y, x = cfg.get("y_col", ""), cfg.get("x_col", "")
+                            entry["result_df"], entry["chart_bytes"] = simple_regression(df_q, y, x)
+                            entry["summary_text"] = (
+                                f"[단순회귀] {y}~{x}:\n"
+                                f"{entry['result_df'].to_string(index=False)}"
+                            )
+                        elif method.startswith("로지스틱"):
+                            y = cfg.get("y_col", "")
+                            xs = cfg.get("x_cols", [])
+                            if xs:
+                                entry["result_df"], entry["chart_bytes"] = logistic_regression(df_q, y, xs)
+                                entry["summary_text"] = (
+                                    f"[로지스틱 회귀] {y}~{'+'.join(xs)}:\n"
+                                    f"{entry['result_df'].to_string(index=False)}"
+                                )
+                except Exception as e:
+                    entry["summary_text"] = f"[{method}] 오류: {e}"
 
-        # ── 단순회귀 ──────────────────────────────────────────
-        elif analysis_method.startswith("단순선형"):
-            y_col = st.selectbox("종속변수 Y", num_cols, index=0)
-            x_col = st.selectbox("독립변수 X", num_cols, index=min(1, len(num_cols)-1))
-            if st.button("▶ 분석 실행", type="primary"):
-                with st.spinner("회귀분석 중..."):
-                    result_df, chart_bytes = simple_regression(df_q, y_col, x_col)
-                st.subheader(f"단순선형회귀: {y_col} ~ {x_col}")
-                st.dataframe(result_df, use_container_width=True)
-                if chart_bytes:
-                    st.image(chart_bytes, use_container_width=True)
-                    st.download_button("📥 그래프 PNG 다운로드", chart_bytes, "regression.png", "image/png")
-                st.download_button("📥 결과표 CSV 다운로드",
-                                   result_df.to_csv(index=False).encode("utf-8-sig"),
-                                   "regression.csv", "text/csv")
-                st.session_state.quant_summary += f"\n[단순회귀] {y_col}~{x_col}:\n{result_df.to_string(index=False)}"
+                results.append(entry)
+                if entry["summary_text"]:
+                    summary_parts.append(entry["summary_text"])
 
-        # ── 로지스틱 회귀 ─────────────────────────────────────
-        elif analysis_method.startswith("로지스틱"):
-            st.caption("종속변수는 0/1 이진 변수여야 합니다.")
-            y_col = st.selectbox("종속변수 Y (0/1 이진)", num_cols, index=0)
-            x_cols = st.multiselect("독립변수 X (복수 선택 가능)",
-                                     [c for c in num_cols if c != y_col],
-                                     default=[c for c in num_cols if c != y_col][:min(3, len(num_cols)-1)])
-            if st.button("▶ 분석 실행", type="primary") and x_cols:
-                with st.spinner("로지스틱 회귀 분석 중..."):
-                    result_df, chart_bytes = logistic_regression(df_q, y_col, x_cols)
-                st.subheader(f"로지스틱 회귀: {y_col} ~ {' + '.join(x_cols)}")
-                st.dataframe(result_df, use_container_width=True)
-                if chart_bytes:
-                    st.image(chart_bytes, use_container_width=True)
-                    st.download_button("📥 그래프 PNG 다운로드", chart_bytes, "logit.png", "image/png")
-                st.download_button("📥 결과표 CSV 다운로드",
-                                   result_df.to_csv(index=False).encode("utf-8-sig"),
-                                   "logistic.csv", "text/csv")
-                st.session_state.quant_summary += f"\n[로지스틱 회귀] {y_col}~{'+'.join(x_cols)}:\n{result_df.to_string(index=False)}"
+            st.session_state.quant_results = results
+            st.session_state.quant_summary = "\n\n".join(summary_parts)
+            st.success(f"✅ {len(results)}개 분석 완료!")
+
+        # ── 결과 표시 (항상 session_state에서 렌더링) ─────────
+        if st.session_state.quant_results:
+            st.markdown("---")
+            st.subheader("📋 분석 결과")
+            for entry in st.session_state.quant_results:
+                with st.expander(f"**{entry['label']}** 결과", expanded=True):
+                    if entry["result_df"] is not None:
+                        st.dataframe(entry["result_df"], use_container_width=True)
+                    if entry.get("extra_df") is not None:
+                        label = "p-value 행렬" if "상관" in entry["label"] else "사후검정 결과"
+                        st.subheader(label)
+                        st.dataframe(entry["extra_df"], use_container_width=True)
+                        if "상관" in entry["label"]:
+                            st.caption("* p<.05  ** p<.01  *** p<.001")
+                    if entry["chart_bytes"]:
+                        st.image(entry["chart_bytes"], use_container_width=True)
+                        safe_name = entry["label"].split("(")[0].strip().replace(" ", "_")
+                        st.download_button("📥 그래프 PNG 다운로드",
+                                           entry["chart_bytes"], f"{safe_name}.png", "image/png",
+                                           key=f"dl_chart_{safe_name}")
+                    if entry["result_df"] is not None:
+                        safe_name = entry["label"].split("(")[0].strip().replace(" ", "_")
+                        st.download_button("📥 결과표 CSV 다운로드",
+                                           entry["result_df"].to_csv(index=False).encode("utf-8-sig"),
+                                           f"{safe_name}.csv", "text/csv",
+                                           key=f"dl_csv_{safe_name}")
 
 
 # ══════════════════════════════════════════════════════════════
@@ -515,6 +529,22 @@ with tab6:
     if st.session_state.preprocessed is None and st.session_state.quant_df is None:
         st.info("먼저 [📂 데이터 업로드] 탭에서 데이터를 업로드하세요.")
     else:
+        # ── 분석 현황 표시 ────────────────────────────────────
+        has_text = st.session_state.freq_df is not None
+        has_quant = bool(st.session_state.quant_results)
+
+        with st.expander("📌 현재 분석 현황", expanded=True):
+            status_cols = st.columns(3)
+            with status_cols[0]:
+                st.metric("텍스트 분석", "완료 ✅" if has_text else "미실행 ⬜")
+            with status_cols[1]:
+                n_quant = len(st.session_state.quant_results)
+                st.metric("정량 분석", f"{n_quant}개 완료 ✅" if has_quant else "미실행 ⬜")
+            with status_cols[2]:
+                topics_ok = st.session_state.topics_df is not None
+                st.metric("토픽 분석", "완료 ✅" if topics_ok else "미실행 ⬜")
+
+        st.markdown("---")
         col1, col2 = st.columns(2)
 
         with col1:
@@ -533,7 +563,6 @@ with tab6:
         with col2:
             st.subheader("⚙️ 리포트 설정")
             subject_input = st.text_input("연구 주제 / 과목명", placeholder="예: 비대면 강의 효과성 분석")
-            include_quant = st.checkbox("정량 분석 결과 포함", value=True)
             api_key = st.text_input(
                 "Anthropic API 키",
                 value=os.getenv("ANTHROPIC_API_KEY", ""),
@@ -546,6 +575,8 @@ with tab6:
         if st.button("🤖 AI 리포트 생성", type="primary", use_container_width=True):
             if not api_key:
                 st.error("API 키를 입력해주세요.")
+            elif not has_text and not has_quant:
+                st.warning("텍스트 분석 또는 정량 분석을 먼저 실행해주세요.")
             else:
                 from src.ai_report import generate_report_stream
 
@@ -555,23 +586,30 @@ with tab6:
                     "subject": subject_input,
                     "doc_type": doc_type,
                 }
-                quant_summary = st.session_state.quant_summary if include_quant else ""
 
                 report_placeholder = st.empty()
                 full_report = ""
+                buf = ""
 
-                with st.spinner("AI 리포트 생성 중..."):
+                with st.spinner("AI 리포트 생성 중... (분량이 많으면 1~2분 소요)"):
                     for chunk in generate_report_stream(
                         st.session_state.freq_df,
                         st.session_state.tfidf_df,
                         st.session_state.topics_df,
-                        quant_summary,
+                        st.session_state.quant_results,
                         meta,
                         api_key,
                         doc_type=doc_type,
                     ):
                         full_report += chunk
+                        buf += chunk
+                        if len(buf) >= 50:
+                            report_placeholder.markdown(full_report)
+                            buf = ""
+                    if buf:
                         report_placeholder.markdown(full_report)
+
+                st.session_state.last_report = full_report
 
                 doc_labels = {"academic": "학술논문", "government": "정부보고서", "research": "연구보고서"}
                 file_base = f"WISDOM_Lab_{doc_labels[doc_type]}_{subject_input or '분석결과'}"
@@ -603,3 +641,8 @@ with tab6:
                         )
                     except Exception as e:
                         st.error(f"Word 변환 오류: {e}")
+
+        # ── 이전 리포트 재표시 ────────────────────────────────
+        elif st.session_state.last_report:
+            st.info("마지막으로 생성된 리포트입니다. 새로 생성하려면 위 버튼을 누르세요.")
+            st.markdown(st.session_state.last_report)
