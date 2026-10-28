@@ -348,21 +348,22 @@ with tab5:
         )
 
         METHOD_LIST = [
-            "기술통계 (Descriptive Statistics)",
-            "빈도분석 (Frequency Analysis)",
-            "상관관계 분석 (Correlation)",
-            "독립표본 T-검정 (Independent T-test)",
-            "대응표본 T-검정 (Paired T-test)",
-            "분산분석 ANOVA (One-way)",
-            "단순선형회귀 (Simple Regression)",
-            "로지스틱 회귀 (Logistic Regression)",
+            ("기술통계 (Descriptive Statistics)",   "📊"),
+            ("빈도분석 (Frequency Analysis)",        "📋"),
+            ("상관관계 분석 (Correlation)",           "🔗"),
+            ("독립표본 T-검정 (Independent T-test)", "🔬"),
+            ("대응표본 T-검정 (Paired T-test)",      "🔄"),
+            ("분산분석 ANOVA (One-way)",              "📈"),
+            ("단순선형회귀 (Simple Regression)",      "📉"),
+            ("로지스틱 회귀 (Logistic Regression)",  "🎯"),
         ]
 
-        selected_methods = st.multiselect(
-            "분석 방법 선택 (복수 선택 가능)",
-            METHOD_LIST,
-            placeholder="분석 방법을 1개 이상 선택하세요",
-        )
+        st.markdown("**분석 방법 선택 (복수 선택 가능)**")
+        chk_cols = st.columns(2)
+        selected_methods = []
+        for i, (name, icon) in enumerate(METHOD_LIST):
+            if chk_cols[i % 2].checkbox(f"{icon} {name}", key=f"chk_{i}"):
+                selected_methods.append(name)
 
         # 저장된 이전 결과 요약 표시
         if st.session_state.quant_results:
